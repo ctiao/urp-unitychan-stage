@@ -205,7 +205,6 @@ Shader "Custom/Visualizer"
 
 			#define ASE_NEEDS_FRAG_SCREEN_POSITION
 			#define ASE_NEEDS_FRAG_WORLD_POSITION
-			#pragma multi_compile_instancing
 			#pragma shader_feature_local _SHOWGRID_ON
 
 
@@ -241,16 +240,16 @@ Shader "Custom/Visualizer"
 			CBUFFER_START(UnityPerMaterial)
 			float4 _Spectra;
 			float4 _BaseColor;
-			float3 _GridColor;
 			float3 _Center;
+			float3 _GridColor;
+			float _RingSpeedMin;
+			float _ReflectionStrength;
+			float _GridEmission;
 			float _RingThicknessMax;
 			float _RingThicknessMin;
+			float _RingSpeedMax;
 			float _RingSrtide;
 			float _RingEmission;
-			float _RingSpeedMax;
-			float _RingSpeedMin;
-			float _GridEmission;
-			float _ReflectionStrength;
 			#ifdef _TRANSMISSION_ASE
 				float _TransmissionShadow;
 			#endif
@@ -271,38 +270,36 @@ Shader "Custom/Visualizer"
 				float _TessMaxDisp;
 			#endif
 			CBUFFER_END
-			sampler2D _ReflectionTex;
 			sampler2D _ReflectionDepthTex;
-			UNITY_INSTANCING_BUFFER_START(CustomVisualizer)
-				UNITY_DEFINE_INSTANCED_PROP(float4x4, _ViewProjectInverse)
-			UNITY_INSTANCING_BUFFER_END(CustomVisualizer)
+			sampler2D _ReflectionTex;
+			float4x4 _ViewProjectInverse;
 
 
-			float Circle( float3 pos )
-			{
-						float o_radius = 5.0;
-							float i_radius = 4.0;
-							float d = length(pos.xz);
-							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
-							return c;
-			}
-			
 			float Hex( float2 p , float2 h )
 			{
 				float2 q = abs(p);
 							return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x);
 			}
 			
-			float Grid( float3 pos )
+			float HexGrid( float3 p )
 			{
-							float grid_size = 0.4;
-							float line_thickness = 0.015;
-							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
-							float s = 0.0;
-							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
-								return 1.0;
-							}
-							return 0.0;
+						float scale = 1.2;
+							float2 grid = float2(0.692, 0.4) * scale;
+							float radius = 0.22 * scale;
+							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
+							float c1 = Hex(p1, radius);
+							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
+							float c2 = Hex(p2, radius);
+							return min(c1, c2);
+			}
+			
+			float3 GuessNormal( float3 p )
+			{
+							const float d = 0.01;
+							return normalize( float3(
+								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
+								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
+								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
 			}
 			
 			float iq_rand( float p )
@@ -330,25 +327,25 @@ Shader "Custom/Visualizer"
 							return a;
 			}
 			
-			float HexGrid( float3 p )
+			float Grid( float3 pos )
 			{
-						float scale = 1.2;
-							float2 grid = float2(0.692, 0.4) * scale;
-							float radius = 0.22 * scale;
-							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
-							float c1 = Hex(p1, radius);
-							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
-							float c2 = Hex(p2, radius);
-							return min(c1, c2);
+							float grid_size = 0.4;
+							float line_thickness = 0.015;
+							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
+							float s = 0.0;
+							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
+								return 1.0;
+							}
+							return 0.0;
 			}
 			
-			float3 GuessNormal( float3 p )
+			float Circle( float3 pos )
 			{
-							const float d = 0.01;
-							return normalize( float3(
-								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
-								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
-								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
+						float o_radius = 5.0;
+							float i_radius = 4.0;
+							float d = length(pos.xz);
+							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
+							return c;
 			}
 			
 			float3 surf43( float4 screenPos , float3 worldPos , float showGrid )
@@ -569,8 +566,6 @@ Shader "Custom/Visualizer"
 					WorldViewDirection = SafeNormalize( WorldViewDirection );
 				#endif
 
-				float4x4 _ViewProjectInverse_Instance = UNITY_ACCESS_INSTANCED_PROP(CustomVisualizer,_ViewProjectInverse);
-				
 				float4 ase_screenPosNorm = ScreenPos / ScreenPos.w;
 				ase_screenPosNorm.z = ( UNITY_NEAR_CLIP_VALUE >= 0 ) ? ase_screenPosNorm.z : ase_screenPosNorm.z * 0.5 + 0.5;
 				float4 screenPos43 = ase_screenPosNorm;
@@ -750,8 +745,7 @@ Shader "Custom/Visualizer"
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ShaderGraphFunctions.hlsl"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
-			#pragma multi_compile_instancing
-
+			
 
 			struct VertexInput
 			{
@@ -778,16 +772,16 @@ Shader "Custom/Visualizer"
 			CBUFFER_START(UnityPerMaterial)
 			float4 _Spectra;
 			float4 _BaseColor;
-			float3 _GridColor;
 			float3 _Center;
+			float3 _GridColor;
+			float _RingSpeedMin;
+			float _ReflectionStrength;
+			float _GridEmission;
 			float _RingThicknessMax;
 			float _RingThicknessMin;
+			float _RingSpeedMax;
 			float _RingSrtide;
 			float _RingEmission;
-			float _RingSpeedMax;
-			float _RingSpeedMin;
-			float _GridEmission;
-			float _ReflectionStrength;
 			#ifdef _TRANSMISSION_ASE
 				float _TransmissionShadow;
 			#endif
@@ -808,38 +802,36 @@ Shader "Custom/Visualizer"
 				float _TessMaxDisp;
 			#endif
 			CBUFFER_END
-			sampler2D _ReflectionTex;
 			sampler2D _ReflectionDepthTex;
-			UNITY_INSTANCING_BUFFER_START(CustomVisualizer)
-				UNITY_DEFINE_INSTANCED_PROP(float4x4, _ViewProjectInverse)
-			UNITY_INSTANCING_BUFFER_END(CustomVisualizer)
+			sampler2D _ReflectionTex;
+			float4x4 _ViewProjectInverse;
 
 
-			float Circle( float3 pos )
-			{
-						float o_radius = 5.0;
-							float i_radius = 4.0;
-							float d = length(pos.xz);
-							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
-							return c;
-			}
-			
 			float Hex( float2 p , float2 h )
 			{
 				float2 q = abs(p);
 							return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x);
 			}
 			
-			float Grid( float3 pos )
+			float HexGrid( float3 p )
 			{
-							float grid_size = 0.4;
-							float line_thickness = 0.015;
-							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
-							float s = 0.0;
-							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
-								return 1.0;
-							}
-							return 0.0;
+						float scale = 1.2;
+							float2 grid = float2(0.692, 0.4) * scale;
+							float radius = 0.22 * scale;
+							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
+							float c1 = Hex(p1, radius);
+							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
+							float c2 = Hex(p2, radius);
+							return min(c1, c2);
+			}
+			
+			float3 GuessNormal( float3 p )
+			{
+							const float d = 0.01;
+							return normalize( float3(
+								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
+								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
+								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
 			}
 			
 			float iq_rand( float p )
@@ -867,25 +859,25 @@ Shader "Custom/Visualizer"
 							return a;
 			}
 			
-			float HexGrid( float3 p )
+			float Grid( float3 pos )
 			{
-						float scale = 1.2;
-							float2 grid = float2(0.692, 0.4) * scale;
-							float radius = 0.22 * scale;
-							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
-							float c1 = Hex(p1, radius);
-							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
-							float c2 = Hex(p2, radius);
-							return min(c1, c2);
+							float grid_size = 0.4;
+							float line_thickness = 0.015;
+							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
+							float s = 0.0;
+							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
+								return 1.0;
+							}
+							return 0.0;
 			}
 			
-			float3 GuessNormal( float3 p )
+			float Circle( float3 pos )
 			{
-							const float d = 0.01;
-							return normalize( float3(
-								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
-								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
-								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
+						float o_radius = 5.0;
+							float i_radius = 4.0;
+							float d = length(pos.xz);
+							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
+							return c;
 			}
 			
 
@@ -1033,7 +1025,6 @@ Shader "Custom/Visualizer"
 					#endif
 				#endif
 
-				float4x4 _ViewProjectInverse_Instance = UNITY_ACCESS_INSTANCED_PROP(CustomVisualizer,_ViewProjectInverse);
 				
 				float Alpha = 1.0;
 				float AlphaClipThreshold = 0.5;
@@ -1082,8 +1073,7 @@ Shader "Custom/Visualizer"
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ShaderGraphFunctions.hlsl"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
-			#pragma multi_compile_instancing
-
+			
 
 			struct VertexInput
 			{
@@ -1110,16 +1100,16 @@ Shader "Custom/Visualizer"
 			CBUFFER_START(UnityPerMaterial)
 			float4 _Spectra;
 			float4 _BaseColor;
-			float3 _GridColor;
 			float3 _Center;
+			float3 _GridColor;
+			float _RingSpeedMin;
+			float _ReflectionStrength;
+			float _GridEmission;
 			float _RingThicknessMax;
 			float _RingThicknessMin;
+			float _RingSpeedMax;
 			float _RingSrtide;
 			float _RingEmission;
-			float _RingSpeedMax;
-			float _RingSpeedMin;
-			float _GridEmission;
-			float _ReflectionStrength;
 			#ifdef _TRANSMISSION_ASE
 				float _TransmissionShadow;
 			#endif
@@ -1140,38 +1130,36 @@ Shader "Custom/Visualizer"
 				float _TessMaxDisp;
 			#endif
 			CBUFFER_END
-			sampler2D _ReflectionTex;
 			sampler2D _ReflectionDepthTex;
-			UNITY_INSTANCING_BUFFER_START(CustomVisualizer)
-				UNITY_DEFINE_INSTANCED_PROP(float4x4, _ViewProjectInverse)
-			UNITY_INSTANCING_BUFFER_END(CustomVisualizer)
+			sampler2D _ReflectionTex;
+			float4x4 _ViewProjectInverse;
 
 
-			float Circle( float3 pos )
-			{
-						float o_radius = 5.0;
-							float i_radius = 4.0;
-							float d = length(pos.xz);
-							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
-							return c;
-			}
-			
 			float Hex( float2 p , float2 h )
 			{
 				float2 q = abs(p);
 							return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x);
 			}
 			
-			float Grid( float3 pos )
+			float HexGrid( float3 p )
 			{
-							float grid_size = 0.4;
-							float line_thickness = 0.015;
-							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
-							float s = 0.0;
-							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
-								return 1.0;
-							}
-							return 0.0;
+						float scale = 1.2;
+							float2 grid = float2(0.692, 0.4) * scale;
+							float radius = 0.22 * scale;
+							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
+							float c1 = Hex(p1, radius);
+							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
+							float c2 = Hex(p2, radius);
+							return min(c1, c2);
+			}
+			
+			float3 GuessNormal( float3 p )
+			{
+							const float d = 0.01;
+							return normalize( float3(
+								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
+								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
+								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
 			}
 			
 			float iq_rand( float p )
@@ -1199,25 +1187,25 @@ Shader "Custom/Visualizer"
 							return a;
 			}
 			
-			float HexGrid( float3 p )
+			float Grid( float3 pos )
 			{
-						float scale = 1.2;
-							float2 grid = float2(0.692, 0.4) * scale;
-							float radius = 0.22 * scale;
-							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
-							float c1 = Hex(p1, radius);
-							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
-							float c2 = Hex(p2, radius);
-							return min(c1, c2);
+							float grid_size = 0.4;
+							float line_thickness = 0.015;
+							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
+							float s = 0.0;
+							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
+								return 1.0;
+							}
+							return 0.0;
 			}
 			
-			float3 GuessNormal( float3 p )
+			float Circle( float3 pos )
 			{
-							const float d = 0.01;
-							return normalize( float3(
-								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
-								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
-								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
+						float o_radius = 5.0;
+							float i_radius = 4.0;
+							float d = length(pos.xz);
+							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
+							return c;
 			}
 			
 
@@ -1356,7 +1344,6 @@ Shader "Custom/Visualizer"
 					#endif
 				#endif
 
-				float4x4 _ViewProjectInverse_Instance = UNITY_ACCESS_INSTANCED_PROP(CustomVisualizer,_ViewProjectInverse);
 				
 				float Alpha = 1.0;
 				float AlphaClipThreshold = 0.5;
@@ -1404,7 +1391,6 @@ Shader "Custom/Visualizer"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 			#define ASE_NEEDS_FRAG_WORLD_POSITION
-			#pragma multi_compile_instancing
 			#pragma shader_feature_local _SHOWGRID_ON
 
 
@@ -1437,16 +1423,16 @@ Shader "Custom/Visualizer"
 			CBUFFER_START(UnityPerMaterial)
 			float4 _Spectra;
 			float4 _BaseColor;
-			float3 _GridColor;
 			float3 _Center;
+			float3 _GridColor;
+			float _RingSpeedMin;
+			float _ReflectionStrength;
+			float _GridEmission;
 			float _RingThicknessMax;
 			float _RingThicknessMin;
+			float _RingSpeedMax;
 			float _RingSrtide;
 			float _RingEmission;
-			float _RingSpeedMax;
-			float _RingSpeedMin;
-			float _GridEmission;
-			float _ReflectionStrength;
 			#ifdef _TRANSMISSION_ASE
 				float _TransmissionShadow;
 			#endif
@@ -1467,38 +1453,36 @@ Shader "Custom/Visualizer"
 				float _TessMaxDisp;
 			#endif
 			CBUFFER_END
-			sampler2D _ReflectionTex;
 			sampler2D _ReflectionDepthTex;
-			UNITY_INSTANCING_BUFFER_START(CustomVisualizer)
-				UNITY_DEFINE_INSTANCED_PROP(float4x4, _ViewProjectInverse)
-			UNITY_INSTANCING_BUFFER_END(CustomVisualizer)
+			sampler2D _ReflectionTex;
+			float4x4 _ViewProjectInverse;
 
 
-			float Circle( float3 pos )
-			{
-						float o_radius = 5.0;
-							float i_radius = 4.0;
-							float d = length(pos.xz);
-							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
-							return c;
-			}
-			
 			float Hex( float2 p , float2 h )
 			{
 				float2 q = abs(p);
 							return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x);
 			}
 			
-			float Grid( float3 pos )
+			float HexGrid( float3 p )
 			{
-							float grid_size = 0.4;
-							float line_thickness = 0.015;
-							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
-							float s = 0.0;
-							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
-								return 1.0;
-							}
-							return 0.0;
+						float scale = 1.2;
+							float2 grid = float2(0.692, 0.4) * scale;
+							float radius = 0.22 * scale;
+							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
+							float c1 = Hex(p1, radius);
+							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
+							float c2 = Hex(p2, radius);
+							return min(c1, c2);
+			}
+			
+			float3 GuessNormal( float3 p )
+			{
+							const float d = 0.01;
+							return normalize( float3(
+								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
+								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
+								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
 			}
 			
 			float iq_rand( float p )
@@ -1526,25 +1510,25 @@ Shader "Custom/Visualizer"
 							return a;
 			}
 			
-			float HexGrid( float3 p )
+			float Grid( float3 pos )
 			{
-						float scale = 1.2;
-							float2 grid = float2(0.692, 0.4) * scale;
-							float radius = 0.22 * scale;
-							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
-							float c1 = Hex(p1, radius);
-							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
-							float c2 = Hex(p2, radius);
-							return min(c1, c2);
+							float grid_size = 0.4;
+							float line_thickness = 0.015;
+							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
+							float s = 0.0;
+							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
+								return 1.0;
+							}
+							return 0.0;
 			}
 			
-			float3 GuessNormal( float3 p )
+			float Circle( float3 pos )
 			{
-							const float d = 0.01;
-							return normalize( float3(
-								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
-								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
-								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
+						float o_radius = 5.0;
+							float i_radius = 4.0;
+							float d = length(pos.xz);
+							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
+							return c;
 			}
 			
 			float3 surf43( float4 screenPos , float3 worldPos , float showGrid )
@@ -1739,8 +1723,6 @@ Shader "Custom/Visualizer"
 					#endif
 				#endif
 
-				float4x4 _ViewProjectInverse_Instance = UNITY_ACCESS_INSTANCED_PROP(CustomVisualizer,_ViewProjectInverse);
-				
 				float4 screenPos = IN.ase_texcoord2;
 				float4 ase_screenPosNorm = screenPos / screenPos.w;
 				ase_screenPosNorm.z = ( UNITY_NEAR_CLIP_VALUE >= 0 ) ? ase_screenPosNorm.z : ase_screenPosNorm.z * 0.5 + 0.5;
@@ -1809,8 +1791,7 @@ Shader "Custom/Visualizer"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/UnityInstancing.hlsl"
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ShaderGraphFunctions.hlsl"
 			
-			#pragma multi_compile_instancing
-
+			
 
 			#pragma shader_feature _ _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
 
@@ -1839,16 +1820,16 @@ Shader "Custom/Visualizer"
 			CBUFFER_START(UnityPerMaterial)
 			float4 _Spectra;
 			float4 _BaseColor;
-			float3 _GridColor;
 			float3 _Center;
+			float3 _GridColor;
+			float _RingSpeedMin;
+			float _ReflectionStrength;
+			float _GridEmission;
 			float _RingThicknessMax;
 			float _RingThicknessMin;
+			float _RingSpeedMax;
 			float _RingSrtide;
 			float _RingEmission;
-			float _RingSpeedMax;
-			float _RingSpeedMin;
-			float _GridEmission;
-			float _ReflectionStrength;
 			#ifdef _TRANSMISSION_ASE
 				float _TransmissionShadow;
 			#endif
@@ -1869,38 +1850,36 @@ Shader "Custom/Visualizer"
 				float _TessMaxDisp;
 			#endif
 			CBUFFER_END
-			sampler2D _ReflectionTex;
 			sampler2D _ReflectionDepthTex;
-			UNITY_INSTANCING_BUFFER_START(CustomVisualizer)
-				UNITY_DEFINE_INSTANCED_PROP(float4x4, _ViewProjectInverse)
-			UNITY_INSTANCING_BUFFER_END(CustomVisualizer)
+			sampler2D _ReflectionTex;
+			float4x4 _ViewProjectInverse;
 
 
-			float Circle( float3 pos )
-			{
-						float o_radius = 5.0;
-							float i_radius = 4.0;
-							float d = length(pos.xz);
-							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
-							return c;
-			}
-			
 			float Hex( float2 p , float2 h )
 			{
 				float2 q = abs(p);
 							return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x);
 			}
 			
-			float Grid( float3 pos )
+			float HexGrid( float3 p )
 			{
-							float grid_size = 0.4;
-							float line_thickness = 0.015;
-							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
-							float s = 0.0;
-							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
-								return 1.0;
-							}
-							return 0.0;
+						float scale = 1.2;
+							float2 grid = float2(0.692, 0.4) * scale;
+							float radius = 0.22 * scale;
+							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
+							float c1 = Hex(p1, radius);
+							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
+							float c2 = Hex(p2, radius);
+							return min(c1, c2);
+			}
+			
+			float3 GuessNormal( float3 p )
+			{
+							const float d = 0.01;
+							return normalize( float3(
+								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
+								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
+								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
 			}
 			
 			float iq_rand( float p )
@@ -1928,25 +1907,25 @@ Shader "Custom/Visualizer"
 							return a;
 			}
 			
-			float HexGrid( float3 p )
+			float Grid( float3 pos )
 			{
-						float scale = 1.2;
-							float2 grid = float2(0.692, 0.4) * scale;
-							float radius = 0.22 * scale;
-							float2 p1 = _gl_mod(p.xz, grid) - grid*0.5;
-							float c1 = Hex(p1, radius);
-							float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5;
-							float c2 = Hex(p2, radius);
-							return min(c1, c2);
+							float grid_size = 0.4;
+							float line_thickness = 0.015;
+							float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size);
+							float s = 0.0;
+							if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {
+								return 1.0;
+							}
+							return 0.0;
 			}
 			
-			float3 GuessNormal( float3 p )
+			float Circle( float3 pos )
 			{
-							const float d = 0.01;
-							return normalize( float3(
-								HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),
-								HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),
-								HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ));
+						float o_radius = 5.0;
+							float i_radius = 4.0;
+							float d = length(pos.xz);
+							float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0);
+							return c;
 			}
 			
 
@@ -2088,7 +2067,6 @@ Shader "Custom/Visualizer"
 					#endif
 				#endif
 
-				float4x4 _ViewProjectInverse_Instance = UNITY_ACCESS_INSTANCED_PROP(CustomVisualizer,_ViewProjectInverse);
 				
 				
 				float3 Albedo = _BaseColor.rgb;
@@ -2114,51 +2092,51 @@ Shader "Custom/Visualizer"
 }
 /*ASEBEGIN
 Version=18100
-1971;42;1780;938;1317.01;413.1809;1.460835;True;False
+1971;42;1780;938;1984.611;324.0699;1.460835;True;False
 Node;AmplifyShaderEditor.TexturePropertyNode;46;-957.3352,-299.5243;Inherit;True;Property;_ReflectionDepthTex;ReflectionDepthTex;12;1;[HideInInspector];Create;True;0;0;True;0;False;None;None;False;white;Auto;Texture2D;-1;0;1;SAMPLER2D;0
+Node;AmplifyShaderEditor.StaticSwitch;67;-509.1687,529.0575;Inherit;False;Property;_ShowGrid;Show Grid;14;0;Create;True;0;0;False;0;False;0;1;1;True;;Toggle;2;Key0;Key1;Create;True;9;1;FLOAT;0;False;0;FLOAT;0;False;2;FLOAT;0;False;3;FLOAT;0;False;4;FLOAT;0;False;5;FLOAT;0;False;6;FLOAT;0;False;7;FLOAT;0;False;8;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.ScreenPosInputsNode;44;-597.2993,144.6635;Float;False;0;False;0;5;FLOAT4;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.CustomExpressionNode;38;-1791.571,691.7924;Inherit;False;float2 q = abs(p)@$			return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x)@;1;False;2;True;p;FLOAT2;0,0;In;;Inherit;False;True;h;FLOAT2;0,0;In;;Inherit;False;Hex;False;True;0;2;0;FLOAT2;0,0;False;1;FLOAT2;0,0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;66;-700.1408,593.98;Inherit;False;Constant;_Float1;Float 1;16;0;Create;True;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.TexturePropertyNode;8;-964,-95;Inherit;True;Property;_ReflectionTex;ReflectionTex;0;0;Create;True;0;0;True;0;False;None;None;False;white;Auto;Texture2D;-1;0;1;SAMPLER2D;0
+Node;AmplifyShaderEditor.RangedFloatNode;16;-939.3003,721.5313;Inherit;False;Property;_RingEmission;RingEmission;3;0;Create;True;0;0;True;0;False;10;10;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.CustomExpressionNode;23;-1796.541,308.6075;Inherit;False;return frac(sin(p)*43758.5453)@;1;False;1;True;p;FLOAT;0;In;;Inherit;False;iq_rand;False;True;0;1;0;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.CustomExpressionNode;37;-1798.767,604.7485;Inherit;False;		float o_radius = 5.0@$			float i_radius = 4.0@$			float d = length(pos.xz)@$			float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0)@$			return c@;1;False;1;True;pos;FLOAT3;0,0,0;In;;Inherit;False;Circle;False;True;0;1;0;FLOAT3;0,0,0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;13;-930,472;Inherit;False;Property;_RingSrtide;RingSrtide;6;0;Create;True;0;0;True;0;False;0.2;0.2;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;18;-946.0459,881.1755;Inherit;False;Property;_RingSpeedMax;RingSpeedMax;8;0;Create;True;0;0;True;0;False;0.5;10;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.CustomExpressionNode;36;-1796.21,520.3896;Inherit;False;			float grid_size = 0.4@$			float line_thickness = 0.015@$$			float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size)@$			float s = 0.0@$			if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {$				return 1.0@$			}$			return 0.0@;1;False;1;True;pos;FLOAT3;0,0,0;In;;Inherit;False;Grid;False;True;0;1;0;FLOAT3;0,0,0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.WorldPosInputsNode;45;-611.5955,337.2613;Inherit;False;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
+Node;AmplifyShaderEditor.ColorNode;62;-301.671,-160.9652;Inherit;False;Property;_BaseColor;Base Color;13;0;Create;True;0;0;False;0;False;0,0,0,0;0,0,0,0;True;0;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.RangedFloatNode;14;-940.4245,554.0177;Inherit;False;Property;_RingThicknessMin;RingThicknessMin;5;0;Create;True;0;0;True;0;False;0.1;0.1;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.CustomExpressionNode;43;-362.2993,178.6635;Inherit;False;float2 coord = (screenPos.xy / screenPos.w)@$$float3 center = worldPos - _Center@$float trails = Rings(center)@$float grid_d = showGrid==1.0?HexGrid(center):0@$float grid = grid_d > 0.0 ? 1.0 : 0.0@$float3 n = GuessNormal(center)@$n = mul(UNITY_MATRIX_VP, float4(n,0.0)).xyz@$float circle = Circle(center)@$$float3 Emission = float3(0.0,0.0,0.0)@$Emission += trails * (0.5 + _Spectra * _RingEmission)@$//o.Albedo += _GridColor * grid * 0.1@$Emission += _GridColor * (grid * circle) * _GridEmission@$$const float blur_radius = 0.005@$float2 blur_coords[9] = {$    float2( 0.000,  0.000),$    float2( 0.1080925165271518,  -0.9546740999616308)*blur_radius,$    float2(-0.4753686437884934,  -0.8417212473681748)*blur_radius,$    float2( 0.7242715177221273,  -0.6574584801064549)*blur_radius,$    float2(-0.023355087558461607, 0.7964400038854089)*blur_radius,$    float2(-0.8308210026544296,  -0.7015103725420933)*blur_radius,$    float2( 0.3243705688309195,   0.2577797517167695)*blur_radius,$    float2( 0.31851240326305463, -0.2220789454739755)*blur_radius,$    float2(-0.36307729185097637, -0.7307245945773899)*blur_radius$}@$float depth = 1.0@$depth = tex2D(_ReflectionDepthTex, coord).r@$for(int i=1@ i<9@ ++i) {$    depth = min(depth, tex2D(_ReflectionDepthTex, coord+blur_coords[i]).r)@$}$$float4 H = float4((coord.x) * 2 - 1, (coord.y) * 2 - 1, depth, 1.0)@$float4 D = mul(_ViewProjectInverse, H)@$float3 refpos = D.xyz / D.w@$$float fade_by_depth = 1.0@$fade_by_depth = max(1.0-abs(refpos.y)*0.3, 0.0)@$float3 refcolor = 0.0@$$float g = saturate((grid_d+0.02)*50.0)@$coord += n.xz * (g>0.0 && g<1.0 ? 1.0 : 0.0) * 0.02@$for(int i=0@ i<9@ ++i) {$    refcolor += tex2D(_ReflectionTex, coord+blur_coords[i]*((1.0-fade_by_depth)*0.75+0.25)).rgb * 0.1111@$    //refcolor += tex2D(_ReflectionTex, coord+blur_coords[i]).rgb * 0.1111@$}$$Emission += refcolor * _ReflectionStrength * fade_by_depth * (1.0-grid*0.9)@$return Emission@;3;False;3;True;screenPos;FLOAT4;0,0,0,0;In;;Inherit;False;True;worldPos;FLOAT3;0,0,0;In;;Inherit;False;True;showGrid;FLOAT;1;In;;Inherit;False;surf;True;False;4;35;39;41;37;3;0;FLOAT4;0,0,0,0;False;1;FLOAT3;0,0,0;False;2;FLOAT;1;False;1;FLOAT3;0
 Node;AmplifyShaderEditor.RangedFloatNode;65;-693.1409,500.7582;Inherit;False;Constant;_Float0;Float 0;16;0;Create;True;0;0;False;0;False;0;0;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.CustomExpressionNode;41;-1799.571,894.7924;Inherit;False;			const float d = 0.01@$			return normalize( float3($				HexGrid(p+float3(  d,0.0,0.0))-HexGrid(p+float3( -d,0.0,0.0)),$				HexGrid(p+float3(0.0,  d,0.0))-HexGrid(p+float3(0.0, -d,0.0)),$				HexGrid(p+float3(0.0,0.0,  d))-HexGrid(p+float3(0.0,0.0, -d)) ))@;3;False;1;True;p;FLOAT3;0,0,0;In;;Inherit;False;GuessNormal;False;True;1;39;1;0;FLOAT3;0,0,0;False;1;FLOAT3;0
 Node;AmplifyShaderEditor.Vector4Node;11;-926,132;Inherit;False;Property;_Spectra;Spectra;2;0;Create;True;0;0;True;0;False;0,0,0,0;0,0,0,0;0;5;FLOAT4;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
-Node;AmplifyShaderEditor.SamplerNode;9;-635,-61;Inherit;True;Property;_TextureSample0;Texture Sample 0;1;0;Create;True;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;6;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
+Node;AmplifyShaderEditor.RangedFloatNode;15;-941.5488,636.0883;Inherit;False;Property;_RingThicknessMax;RingThicknessMax;4;0;Create;True;0;0;True;0;False;0.5;0.5;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.CustomExpressionNode;39;-1796.571,804.7924;Inherit;False;		float scale = 1.2@$			float2 grid = float2(0.692, 0.4) * scale@$			float radius = 0.22 * scale@$$			float2 p1 = _gl_mod(p.xz, grid) - grid*0.5@$			float c1 = Hex(p1, radius)@$$			float2 p2 = _gl_mod(p.xz+grid*0.5, grid) - grid*0.5@$			float c2 = Hex(p2, radius)@$			return min(c1, c2)@;1;False;1;True;p;FLOAT3;0,0,0;In;;Inherit;False;HexGrid;False;True;1;38;1;0;FLOAT3;0,0,0;False;1;FLOAT;0
 Node;AmplifyShaderEditor.CustomExpressionNode;35;-1799.653,405.8653;Inherit;False;			float pi = 3.14159@$			float2 wpos = pos.xz@$$			float stride = _RingSrtide@$			float strine_half = stride * 0.5@$			float thickness = 1.0 - (_RingThicknessMin + length(_Spectra)*(_RingThicknessMax-_RingThicknessMin))@$			float distance = abs(length(wpos) - _Time.y*0.1)@$			float fra = _gl_mod(distance, stride)@$			float cycle = floor((distance)/stride)@$$			float c = strine_half - abs(fra-strine_half) - strine_half*thickness@$			c = max(c * (1.0/(strine_half*thickness)), 0.0)@$$			float rs = iq_rand(cycle*cycle)@$			float r = iq_rand(cycle) + _Time.y*(_RingSpeedMin+(_RingSpeedMax-_RingSpeedMin)*rs)@$$			float angle = atan2(wpos.y, wpos.x) / pi *0.5 + 0.5@ // 0.0-1.0$			float a = 1.0-_gl_mod(angle + r, 1.0)@$			a = max(a-0.7, 0.0) * c@$			return a@;1;False;1;True;pos;FLOAT3;0,0,0;In;;Inherit;False;Rings;False;True;1;23;1;0;FLOAT3;0,0,0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;17;-942.673,799.1051;Inherit;False;Property;_RingSpeedMin;RingSpeedMin ;7;0;Create;True;0;0;True;0;False;0.2;10;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.SamplerNode;9;-635,-61;Inherit;True;Property;_TextureSample0;Texture Sample 0;1;0;Create;True;0;0;False;0;False;-1;None;None;True;0;False;white;Auto;False;Object;-1;Auto;Texture2D;6;0;SAMPLER2D;;False;1;FLOAT2;0,0;False;2;FLOAT;0;False;3;FLOAT2;0,0;False;4;FLOAT2;0,0;False;5;FLOAT;1;False;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
 Node;AmplifyShaderEditor.Vector3Node;12;-928,320;Inherit;False;Property;_Center;Center;1;0;Create;True;0;0;True;0;False;0,0,0;0,0,0;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
 Node;AmplifyShaderEditor.Vector3Node;20;-942.6733,967.7429;Inherit;False;Property;_GridColor;GridColor;11;0;Create;True;0;0;True;0;False;0.2,0.3,0.5;0.2,0.3,0.5;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
 Node;AmplifyShaderEditor.RangedFloatNode;47;-178.6587,279.7032;Inherit;False;Constant;_alpha;alpha;13;0;Create;True;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.RangedFloatNode;22;-943.6755,1220.822;Inherit;False;Property;_ReflectionStrength;ReflectionStrength;10;0;Create;True;0;0;True;0;False;0.2;10;0;0;0;1;FLOAT;0
 Node;AmplifyShaderEditor.RangedFloatNode;21;-941.2709,1133.422;Inherit;False;Property;_GridEmission;GridEmission;9;0;Create;True;0;0;True;0;False;8;10;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.CustomExpressionNode;43;-362.2993,178.6635;Inherit;False;float2 coord = (screenPos.xy / screenPos.w)@$$float3 center = worldPos - _Center@$float trails = Rings(center)@$float grid_d = showGrid==1.0?HexGrid(center):0@$float grid = grid_d > 0.0 ? 1.0 : 0.0@$float3 n = GuessNormal(center)@$n = mul(UNITY_MATRIX_VP, float4(n,0.0)).xyz@$float circle = Circle(center)@$$float3 Emission = float3(0.0,0.0,0.0)@$Emission += trails * (0.5 + _Spectra * _RingEmission)@$//o.Albedo += _GridColor * grid * 0.1@$Emission += _GridColor * (grid * circle) * _GridEmission@$$const float blur_radius = 0.005@$float2 blur_coords[9] = {$    float2( 0.000,  0.000),$    float2( 0.1080925165271518,  -0.9546740999616308)*blur_radius,$    float2(-0.4753686437884934,  -0.8417212473681748)*blur_radius,$    float2( 0.7242715177221273,  -0.6574584801064549)*blur_radius,$    float2(-0.023355087558461607, 0.7964400038854089)*blur_radius,$    float2(-0.8308210026544296,  -0.7015103725420933)*blur_radius,$    float2( 0.3243705688309195,   0.2577797517167695)*blur_radius,$    float2( 0.31851240326305463, -0.2220789454739755)*blur_radius,$    float2(-0.36307729185097637, -0.7307245945773899)*blur_radius$}@$float depth = 1.0@$depth = tex2D(_ReflectionDepthTex, coord).r@$for(int i=1@ i<9@ ++i) {$    depth = min(depth, tex2D(_ReflectionDepthTex, coord+blur_coords[i]).r)@$}$$float4 H = float4((coord.x) * 2 - 1, (coord.y) * 2 - 1, depth, 1.0)@$float4 D = mul(_ViewProjectInverse, H)@$float3 refpos = D.xyz / D.w@$$float fade_by_depth = 1.0@$fade_by_depth = max(1.0-abs(refpos.y)*0.3, 0.0)@$float3 refcolor = 0.0@$$float g = saturate((grid_d+0.02)*50.0)@$coord += n.xz * (g>0.0 && g<1.0 ? 1.0 : 0.0) * 0.02@$for(int i=0@ i<9@ ++i) {$    refcolor += tex2D(_ReflectionTex, coord+blur_coords[i]*((1.0-fade_by_depth)*0.75+0.25)).rgb * 0.1111@$    //refcolor += tex2D(_ReflectionTex, coord+blur_coords[i]).rgb * 0.1111@$}$$Emission += refcolor * _ReflectionStrength * fade_by_depth * (1.0-grid*0.9)@$return Emission@;3;False;3;True;screenPos;FLOAT4;0,0,0,0;In;;Inherit;False;True;worldPos;FLOAT3;0,0,0;In;;Inherit;False;True;showGrid;FLOAT;1;In;;Inherit;False;surf;True;False;4;35;39;41;37;3;0;FLOAT4;0,0,0,0;False;1;FLOAT3;0,0,0;False;2;FLOAT;1;False;1;FLOAT3;0
-Node;AmplifyShaderEditor.RangedFloatNode;15;-941.5488,636.0883;Inherit;False;Property;_RingThicknessMax;RingThicknessMax;4;0;Create;True;0;0;True;0;False;0.5;0.5;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.ColorNode;62;-301.671,-160.9652;Inherit;False;Property;_BaseColor;Base Color;14;0;Create;True;0;0;False;0;False;0,0,0,0;0,0,0,0;True;0;5;COLOR;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
-Node;AmplifyShaderEditor.WorldPosInputsNode;45;-611.5955,337.2613;Inherit;False;0;4;FLOAT3;0;FLOAT;1;FLOAT;2;FLOAT;3
-Node;AmplifyShaderEditor.RangedFloatNode;14;-940.4245,554.0177;Inherit;False;Property;_RingThicknessMin;RingThicknessMin;5;0;Create;True;0;0;True;0;False;0.1;0.1;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.CustomExpressionNode;36;-1796.21,520.3896;Inherit;False;			float grid_size = 0.4@$			float line_thickness = 0.015@$$			float2 m = _gl_mod(abs(pos.xz*sign(pos.xz)), grid_size)@$			float s = 0.0@$			if(m.x-line_thickness < 0.0 || m.y-line_thickness < 0.0) {$				return 1.0@$			}$			return 0.0@;1;False;1;True;pos;FLOAT3;0,0,0;In;;Inherit;False;Grid;False;True;0;1;0;FLOAT3;0,0,0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;18;-946.0459,881.1755;Inherit;False;Property;_RingSpeedMax;RingSpeedMax;8;0;Create;True;0;0;True;0;False;0.5;10;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;13;-930,472;Inherit;False;Property;_RingSrtide;RingSrtide;6;0;Create;True;0;0;True;0;False;0.2;0.2;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.CustomExpressionNode;37;-1798.767,604.7485;Inherit;False;		float o_radius = 5.0@$			float i_radius = 4.0@$			float d = length(pos.xz)@$			float c = max(o_radius-(o_radius-_gl_mod(d-_Time.y*1.5, o_radius))-i_radius, 0.0)@$			return c@;1;False;1;True;pos;FLOAT3;0,0,0;In;;Inherit;False;Circle;False;True;0;1;0;FLOAT3;0,0,0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.CustomExpressionNode;23;-1796.541,308.6075;Inherit;False;return frac(sin(p)*43758.5453)@;1;False;1;True;p;FLOAT;0;In;;Inherit;False;iq_rand;False;True;0;1;0;FLOAT;0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.RangedFloatNode;16;-939.3003,721.5313;Inherit;False;Property;_RingEmission;RingEmission;3;0;Create;True;0;0;True;0;False;10;10;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.TexturePropertyNode;8;-964,-95;Inherit;True;Property;_ReflectionTex;ReflectionTex;0;0;Create;True;0;0;True;0;False;None;None;False;white;Auto;Texture2D;-1;0;1;SAMPLER2D;0
-Node;AmplifyShaderEditor.RangedFloatNode;66;-700.1408,593.98;Inherit;False;Constant;_Float1;Float 1;16;0;Create;True;0;0;False;0;False;1;0;0;0;0;1;FLOAT;0
-Node;AmplifyShaderEditor.CustomExpressionNode;38;-1791.571,691.7924;Inherit;False;float2 q = abs(p)@$			return max(q.x-h.y,max(q.x+q.y*0.57735,q.y*1.1547)-h.x)@;1;False;2;True;p;FLOAT2;0,0;In;;Inherit;False;True;h;FLOAT2;0,0;In;;Inherit;False;Hex;False;True;0;2;0;FLOAT2;0,0;False;1;FLOAT2;0,0;False;1;FLOAT;0
-Node;AmplifyShaderEditor.ScreenPosInputsNode;44;-597.2993,144.6635;Float;False;0;False;0;5;FLOAT4;0;FLOAT;1;FLOAT;2;FLOAT;3;FLOAT;4
-Node;AmplifyShaderEditor.Matrix4X4Node;54;-1219.672,126.0402;Inherit;False;InstancedProperty;_ViewProjectInverse;ViewProjectInverse;13;0;Create;True;0;0;True;0;False;1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1;0;1;FLOAT4x4;0
-Node;AmplifyShaderEditor.StaticSwitch;67;-509.1687,529.0575;Inherit;False;Property;_ShowGrid;Show Grid;15;0;Create;True;0;0;False;0;False;0;1;0;True;;Toggle;2;Key0;Key1;Create;True;9;1;FLOAT;0;False;0;FLOAT;0;False;2;FLOAT;0;False;3;FLOAT;0;False;4;FLOAT;0;False;5;FLOAT;0;False;6;FLOAT;0;False;7;FLOAT;0;False;8;FLOAT;0;False;1;FLOAT;0
+Node;AmplifyShaderEditor.RangedFloatNode;17;-942.673,799.1051;Inherit;False;Property;_RingSpeedMin;RingSpeedMin ;7;0;Create;True;0;0;True;0;False;0.2;10;0;0;0;1;FLOAT;0
+Node;AmplifyShaderEditor.Matrix4X4Node;54;-1219.672,126.0402;Inherit;False;Global;_ViewProjectInverse;ViewProjectInverse;13;0;Create;True;0;0;True;0;False;1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1;0;1;FLOAT4x4;0
+Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;3;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;ShadowCaster;0;2;ShadowCaster;0;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;False;False;True;1;False;-1;True;3;False;-1;False;True;1;LightMode=ShadowCaster;False;0;Hidden/InternalErrorShader;0;0;Standard;0;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;4;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;DepthOnly;0;3;DepthOnly;0;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;True;False;False;False;False;0;False;-1;False;True;1;False;-1;False;False;True;1;LightMode=DepthOnly;False;0;Hidden/InternalErrorShader;0;0;Standard;0;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;1;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;ExtraPrePass;0;0;ExtraPrePass;5;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;True;1;1;False;-1;0;False;-1;0;1;False;-1;0;False;-1;False;False;True;0;False;-1;True;True;True;True;True;0;False;-1;True;False;255;False;-1;255;False;-1;255;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;0;False;0;Hidden/InternalErrorShader;0;0;Standard;0;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;6;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;Universal2D;0;5;Universal2D;0;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;True;1;1;False;-1;0;False;-1;1;1;False;-1;0;False;-1;False;False;False;True;True;True;True;True;0;False;-1;False;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;1;LightMode=Universal2D;False;0;Hidden/InternalErrorShader;0;0;Standard;0;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;5;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;Meta;0;4;Meta;0;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;True;2;False;-1;False;False;False;False;False;True;1;LightMode=Meta;False;0;Hidden/InternalErrorShader;0;0;Standard;0;0
 Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;2;0,0;Float;False;True;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;Custom/Visualizer;94348b07e5e8bab40bd6c8a1e3df54cd;True;Forward;0;1;Forward;16;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;True;1;1;False;-1;0;False;-1;1;1;False;-1;0;False;-1;False;False;False;True;True;True;True;True;0;False;-1;True;False;255;False;-1;255;False;-1;255;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;7;False;-1;1;False;-1;1;False;-1;1;False;-1;True;1;False;-1;True;3;False;-1;True;True;0;False;-1;0;False;-1;True;1;LightMode=UniversalForward;False;0;Hidden/InternalErrorShader;0;0;Standard;33;Workflow;1;Surface;0;  Refraction Model;0;  Blend;0;Two Sided;1;Transmission;0;  Transmission Shadow;0.5,False,-1;Translucency;0;  Translucency Strength;1,False,-1;  Normal Distortion;0.5,False,-1;  Scattering;2,False,-1;  Direct;0.9,False,-1;  Ambient;0.1,False,-1;  Shadow;0.5,False,-1;Cast Shadows;1;Receive Shadows;1;GPU Instancing;1;LOD CrossFade;1;Built-in Fog;1;Meta Pass;1;Override Baked GI;0;Extra Pre Pass;0;DOTS Instancing;0;Tessellation;0;  Phong;0;  Strength;0.5,False,-1;  Type;0;  Tess;16,False,-1;  Min;10,False,-1;  Max;25,False,-1;  Edge Length;16,False,-1;  Max Displacement;25,False,-1;Vertex Position,InvertActionOnDeselection;1;0;6;False;True;True;True;True;True;False;;0
-Node;AmplifyShaderEditor.TemplateMultiPassMasterNode;3;0,0;Float;False;False;-1;2;UnityEditor.ShaderGraph.PBRMasterGUI;0;2;New Amplify Shader;94348b07e5e8bab40bd6c8a1e3df54cd;True;ShadowCaster;0;2;ShadowCaster;0;False;False;False;True;0;False;-1;False;False;False;False;False;True;3;RenderPipeline=UniversalPipeline;RenderType=Opaque=RenderType;Queue=Geometry=Queue=0;True;0;0;False;False;False;False;False;False;True;1;False;-1;True;3;False;-1;False;True;1;LightMode=ShadowCaster;False;0;Hidden/InternalErrorShader;0;0;Standard;0;0
-WireConnection;9;0;8;0
+WireConnection;67;1;65;0
+WireConnection;67;0;66;0
 WireConnection;43;0;44;0
 WireConnection;43;1;45;0
 WireConnection;43;2;67;0
-WireConnection;67;1;65;0
-WireConnection;67;0;66;0
+WireConnection;9;0;8;0
 WireConnection;2;0;62;0
 WireConnection;2;2;43;0
 WireConnection;2;6;47;0
 ASEEND*/
-//CHKSM=11454E27DAB12CF503E6887882B630731947CAA0
+//CHKSM=55A50D904F536966CDDFAA5C778C0F44FC08DC65
