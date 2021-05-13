@@ -29,7 +29,20 @@ public class MirrorReflection : MonoBehaviour
 	{
 		if (!enabled || !GetComponent<Renderer>() || !GetComponent<Renderer>().sharedMaterial || !GetComponent<Renderer>().enabled)
 			return;
-
+		if (camera != Camera.main)
+		{
+#if UNITY_EDITOR
+					if (SceneView.lastActiveSceneView != null)
+					{
+						if (camera != SceneView.lastActiveSceneView.camera)
+							return;
+					}
+					else
+						return;
+		#else
+					return;
+		#endif
+}
 		Camera cam = camera;//Camera.current;
 		if (!cam)
 			return;
